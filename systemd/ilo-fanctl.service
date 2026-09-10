@@ -1,0 +1,83 @@
+[Unit]
+Description=iLO 4 fan floor controller
+Documentation=https://github.com/alekc/ilo-fanctl
+After=network-online.target
+Wants=network-online.target
+
+# The IPMI sensor groups need /dev/ipmi0, which appears when ipmi_si and
+# ipmi_devintf load. Starting first is not fatal, those groups are blind for a
+# cycle or two and then recover, but there is no reason to make the first
+# minute of every boot look like a fault.
+After=systemd-modules-load.service
+
+# No start rate limit. Restart=always below exists because a BMC that has gone
+# away comes back, and the default limit turns five failures in ten seconds
+# into a permanently dead unit that has to be reset by hand. A thermal daemon
+# must keep trying; the machine is not cooler for the unit having given up.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ilo-fanctl -config /etc/ilo-fanctl/config.yaml
+
+# The config is polled and picked up within a few seconds anyway; this makes
+# an edit take effect immediately. A config that fails validation is rejected
+# and the running one stays in force, so a reload cannot stop the cooling.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Root, because smartctl issues SG_IO ioctls against the raw devices and
+# ipmitool talks to /dev/ipmi0. Both need privileges no unprivileged user has,
+# and this must run on the machine that physically owns them: on a virtualised
+# host that is the hypervisor, not a guest.
+User=root
+
+Restart=always
+RestartSec=10s
+
+# On shutdown the daemon winds every managed fan down to min_floor_pct, which
+# costs one SSH round trip per fan against a slow BMC. Give it room to finish;
+# a SIGKILL here leaves the last floor applied until the BMC is reset. Size
+# this up if you manage many fans: iLO's shell needs a few hundred
+# milliseconds between commands and will drop ones sent faster.
+TimeoutStopSec=45
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/ilo-fanctl
+PrivateTmp=yes
+ProtectHostname=yes
+ProtectControlGroups=yes
+ProtectKernelTunables=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# AF_NETLINK is here for the Go runtime's interface enumeration, not for the
+# BMC session, which is an ordinary TCP connection.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# ProtectHome=yes assumes the BMC key is where config.example.yaml puts it,
+# /etc/ilo-fanctl/id_rsa. A key under /root or a home directory is unreadable
+# with this set, and the failure is an authentication error rather than a
+# permission one, so it does not point at its own cause.
+
+# Deliberately absent, and none of these should be added without testing
+# against real hardware, because every one of them takes away a device this
+# needs and none of them fails in a way that says so:
+#
+#   ProtectKernelModules  blocks the ipmi_devintf autoload some distributions
+#                         rely on.
+#   PrivateDevices        hides /dev/ipmi0 and the block devices.
+#   ProtectClock          looks unrelated and is not: it implies
+#                         DeviceAllow=char-rtc r, and one DeviceAllow entry
+#                         turns the unit's device policy into an allow list,
+#                         which then excludes /dev/ipmi0 and every disk.
+#                         ProtectKernelLogs is worth checking for the same
+#                         thing before adding it.
+
+[Install]
+WantedBy=multi-user.target

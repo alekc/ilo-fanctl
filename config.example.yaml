@@ -1,0 +1,238 @@
+# ilo-fanctl configuration.
+#
+# Run this on the machine that physically owns the drives and the BMC's KCS
+# interface, which on a virtualised host means the hypervisor, not a guest.
+# smartctl needs the raw block devices and ipmitool needs /dev/ipmi0; a VM has
+# neither.
+#
+# Everything here is validated at startup. A typo'd key, an unknown sensor
+# name, a curve that slopes the wrong way, or a sensor the BMC does not report
+# all fail the process immediately rather than producing a fan that quietly
+# never moves. Check a file without starting the daemon:
+#
+#   ilo-fanctl -config config.yaml -check
+#
+# The file is also re-read while running. Edit it and the change lands within
+# a few seconds, or send SIGHUP to apply it at once. A file that fails
+# validation is rejected and the previous config keeps running.
+
+# ---------------------------------------------------------------------------
+# BMC connection
+# ---------------------------------------------------------------------------
+ilo:
+  host: 192.0.2.10
+  port: 22
+
+  # A dedicated iLO user with every privilege unchecked. It cannot power the
+  # machine, mount media, or change settings; the fan commands added by
+  # ilo4_unlock are not privilege-checked, which is what makes this safe.
+  user: ilofanuser
+
+  # Exactly one of private_key_path or password_file. Prefer the key: iLO 4
+  # accepts one via "oemhp_loadSSHKey" and it keeps the secret out of any
+  # process listing.
+  #
+  # iLO 4 will not accept an ed25519 key. Generate RSA:
+  #   ssh-keygen -t rsa -b 2048 -m PEM -f /etc/ilo-fanctl/id_rsa -C ilofanuser
+  private_key_path: /etc/ilo-fanctl/id_rsa
+  # password_file: /etc/ilo-fanctl/password
+
+  # The BMC's public key in authorized_keys form. Leaving this empty is
+  # permitted and logged loudly at every startup. Get it with:
+  #   ssh-keyscan -t rsa 192.0.2.10
+  host_key: "ssh-rsa AAAAB3NzaC1yc2EAAAAD...replace-me"
+
+  # iLO 4 speaks SHA-1 era crypto that both OpenSSH 9+ and current Go disable
+  # by default. These lists are configurable rather than hard-coded because
+  # the working set varies across firmware builds.
+  kex_algorithms: ["diffie-hellman-group14-sha1"]
+  host_key_algorithms: ["ssh-rsa"]
+  ciphers: ["aes256-ctr", "aes128-ctr"]
+  macs: ["hmac-sha1"]
+
+  connect_timeout: 15s
+
+  # iLO 4's shell drops commands sent back to back. 350ms between writes is
+  # what upstream testing settled on; shortening it loses commands silently,
+  # because the fan commands print nothing either way.
+  command_interval: 350ms
+
+# ---------------------------------------------------------------------------
+# Loop and telemetry
+# ---------------------------------------------------------------------------
+
+# One SSH round trip per fan write plus one read-back. With six fans and a
+# 350ms interval a cycle costs roughly three seconds, so anything under 15s
+# leaves no idle time.
+interval: 30s
+
+# Prometheus exporter. Applied at startup only: changing it needs a restart,
+# because rebinding under a live scrape would drop it silently.
+listen: "127.0.0.1:9873"
+
+tools:
+  ipmitool_path: /usr/bin/ipmitool
+  smartctl_path: /usr/sbin/smartctl
+
+# ---------------------------------------------------------------------------
+# Fans
+#
+# The index is ZERO-based: index 0 is the fan iLO labels "Fan 1" and the CLP
+# exposes as /system1/fan1. Confirmed on Gen9 by commanding index 0 and
+# watching Fan 1 move. Getting this wrong addresses the neighbouring fan with
+# no error.
+#
+# A DL380 Gen9's six fans sit in one row spanning the chassis, and all air
+# crosses the drive cage before the CPUs, so there is one real airflow zone.
+# Zones exist for chassis layouts where that is not true.
+# ---------------------------------------------------------------------------
+fans:
+  - { index: 0, label: "Fan 1", zones: [chassis] }
+  - { index: 1, label: "Fan 2", zones: [chassis] }
+  - { index: 2, label: "Fan 3", zones: [chassis] }
+  - { index: 3, label: "Fan 4", zones: [chassis] }
+  - { index: 4, label: "Fan 5", zones: [chassis] }
+  - { index: 5, label: "Fan 6", zones: [chassis] }
+
+# ---------------------------------------------------------------------------
+# Sensors
+#
+# Drives come from SMART, everything else from IPMI. That split is not a
+# preference: iLO's "08-HD Max" claims to be the maximum drive temperature and
+# is not. Measured on a DL380 Gen9 in HBA mode it read 44 to 46 C while the
+# hottest SAS drive was 56 C, tracking the coolest drive instead. Its only
+# threshold is Upper Critical 60 C and thresholds are not settable, so the BMC
+# would first react at roughly 70 C of real drive temperature.
+#
+# IPMI sensor names must match "ipmitool sdr type Temperature" exactly. A name
+# the BMC does not report, or reports as Disabled, is a startup error. Most
+# DIMM sensors on a partly populated Gen9 are Disabled; do not list them.
+#
+# A sensor group with no curve is still collected and exported as a metric.
+# ---------------------------------------------------------------------------
+sensors:
+  drives:
+    kind: smart
+    aggregate: max
+    # Explicit is better than discovery here: a listed drive that stops
+    # responding is an error, whereas "auto" would silently shrink the set and
+    # the maximum would quietly drop.
+    devices:
+      - /dev/sda
+      - /dev/sdb
+      - /dev/sdc
+      - /dev/sdd
+      - /dev/sde
+      - /dev/sdf
+    # devices: [auto]   # smartctl --scan
+
+  cpu:
+    kind: ipmi
+    aggregate: max
+    match:
+      - "02-CPU 1"
+      - "03-CPU 2"
+
+  hba:
+    kind: ipmi
+    aggregate: max
+    match:
+      - "27-HD Controller"
+
+  # Observability only, no curve. Useful for telling "the room got hot" apart
+  # from "this machine got hot" when reading the metrics later.
+  inlet:
+    kind: ipmi
+    aggregate: max
+    match:
+      - "01-Inlet Ambient"
+
+# ---------------------------------------------------------------------------
+# Curves
+#
+# Each curve maps its sensor's aggregate onto a demanded MINIMUM fan speed for
+# its zones. Points are piecewise linear, must ascend in temperature, and must
+# never demand less cooling as temperature rises. Below the first point and
+# above the last, the curve clamps rather than extrapolating.
+#
+# Every curve covering a fan is evaluated and the HIGHEST demand wins. That is
+# the answer to "what if the CPU is hot but the drives are cold": the cpu curve
+# raises the same fans the drives curve does, and neither can hold the other
+# down.
+# ---------------------------------------------------------------------------
+curves:
+  - name: drives
+    sensor: drives
+    zones: [chassis]
+    points:
+      - { temp: 35, pwm_pct: 12 }
+      - { temp: 42, pwm_pct: 18 }
+      - { temp: 46, pwm_pct: 26 }
+      - { temp: 50, pwm_pct: 38 }
+      - { temp: 54, pwm_pct: 55 }
+      - { temp: 58, pwm_pct: 70 }
+
+  - name: cpu
+    sensor: cpu
+    zones: [chassis]
+    # Deliberately slack. iLO's own CPU curve is accurate and already runs the
+    # fans above whatever floor is set here; this exists only so a CPU thermal
+    # event cannot be masked by cold drives, not to take over CPU cooling.
+    points:
+      - { temp: 60, pwm_pct: 12 }
+      - { temp: 75, pwm_pct: 25 }
+      - { temp: 85, pwm_pct: 45 }
+      - { temp: 92, pwm_pct: 70 }
+
+  - name: hba
+    sensor: hba
+    zones: [chassis]
+    # A Smart HBA H240ar in HBA mode sits behind the drive cage and has no fan
+    # of its own. It idles near 67 C on the reference machine, which is why
+    # this curve starts there rather than lower.
+    points:
+      - { temp: 65, pwm_pct: 12 }
+      - { temp: 72, pwm_pct: 22 }
+      - { temp: 80, pwm_pct: 40 }
+      - { temp: 88, pwm_pct: 70 }
+
+# ---------------------------------------------------------------------------
+# Safety
+#
+# Note what is absent: there is no maximum-speed setting, here or anywhere in
+# the program. iLO's "fan p N max" caps a fan and can starve the machine of
+# cooling; upstream attributes a fans-to-100-percent thermal shutdown partly to
+# one left applied for hours. This program only ever raises floors, so the
+# BMC's own curve stays free to run the fans as fast as it likes.
+# ---------------------------------------------------------------------------
+safety:
+  # Ceiling on the FLOOR this program will command, not a cap on fan speed.
+  # It bounds how loud a runaway curve or a bad sensor read can make the
+  # machine; the BMC can still go to 100 percent on its own.
+  max_floor_pct: 70
+
+  # Never command below this. iLO idles these fans at 9 to 11 percent.
+  min_floor_pct: 12
+
+  # Do not rewrite a floor unless the new demand differs by at least this
+  # much. Every write costs an SSH round trip and the BMC's shell is slow.
+  hysteresis_pct: 3
+
+  # Floors rise immediately and fall slowly. Ramping down gradually stops the
+  # fans oscillating around a curve knee, and errs toward more cooling.
+  ramp_down_per_cycle_pct: 2
+
+  on_sensor_error:
+    # hold_last keeps the last good floor for max_hold, then falls back to
+    # fixed_pct. Holding forever is not offered: a controller blind for an
+    # hour is not regulating anything, it is just leaving a number applied.
+    action: hold_last
+    max_hold: 5m
+    fixed_pct: 45
+
+  # Crossing any of these jumps straight to max_floor_pct on every fan,
+  # bypassing the curves and the ramp-down limit, until it falls back below.
+  critical:
+    - { sensor: drives, temp: 58 }
+    - { sensor: cpu, temp: 92 }
+    - { sensor: hba, temp: 88 }

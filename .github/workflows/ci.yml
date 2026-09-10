@@ -1,0 +1,92 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          # setup-go forces GOTOOLCHAIN=local, so this pin decides the
+          # toolchain regardless of what go.mod asks for.
+          go-version: "1.25"
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "these files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test -race -count=1 ./...
+
+      - name: validate the example config
+        run: |
+          ssh-keygen -t rsa -b 2048 -m PEM -f /tmp/id_rsa -N '' -q
+          sed 's#/etc/ilo-fanctl/id_rsa#/tmp/id_rsa#' config.example.yaml > /tmp/config.yaml
+          go run ./cmd/ilo-fanctl -config /tmp/config.yaml -check
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      # One arch failing to compile is a fact worth having about all of them,
+      # so the others are allowed to finish.
+      fail-fast: false
+      matrix:
+        include:
+          # The only real deployment target: iLO 4 is Gen8 and Gen9, which are
+          # x86-64, and this has to run on the host that owns the drives.
+          - goos: linux
+            goarch: amd64
+          # Cross-compiles for free and catches anything that quietly assumes
+          # a word size or an amd64-only dependency.
+          - goos: linux
+            goarch: arm64
+          # Not a deployment target. It is the machine the maintainer builds
+          # on, so a Linux-only import should fail here rather than the next
+          # time someone runs go test locally.
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+          cache: true
+
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          out="ilo-fanctl-${GOOS}-${GOARCH}"
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_SHA::12}" \
+            -o "dist/${out}" ./cmd/ilo-fanctl
+          ls -l "dist/${out}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ilo-fanctl-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          retention-days: 14
+          if-no-files-found: error
