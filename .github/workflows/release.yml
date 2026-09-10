@@ -21,13 +21,18 @@ jobs:
       # Only this job creates anything, and only this job gets write.
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      # Commit pins, tag in the trailing comment. This job is the one that
+      # holds a contents: write token, so an action here can rewrite what the
+      # release publishes; a moved tag would do that with nothing to review.
+      # The reasoning and the update path are in ci.yml, which is pinned the
+      # same way.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The changelog diffs against the previous tag, which is not in a
           # shallow clone.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
           cache: true
@@ -35,7 +40,7 @@ jobs:
       # Everything this used to do by hand (build the matrix, stamp the tag,
       # checksum, create the release) now lives in .goreleaser.yaml, which
       # also builds the deb and rpm that the shell loop never could.
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "~> v2"
           args: release --clean

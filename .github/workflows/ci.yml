@@ -18,6 +18,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Every action is pinned to a commit, with the tag it was resolved from in a
+# trailing comment. A tag is a mutable pointer: whoever owns the action can
+# move v7 to a different commit, and every workflow referencing it runs the
+# new code on its next run, with no diff anywhere to review. The stakes are
+# highest in release.yml, whose job holds a contents: write token, but an
+# action in any job here is handed the source tree and the module cache, so
+# the whole pipeline is pinned rather than the one job that looked dangerous.
+#
+# The pins are only half of it. A frozen action stops receiving its own
+# upstream fixes, so .github/dependabot.yml raises the pull request that moves
+# them, and the trailing comment is what makes that diff readable.
+
 env:
   # The newest toolchain, used everywhere except the test matrix below.
   GO_VERSION: "1.27"
@@ -30,9 +42,9 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # setup-go forces GOTOOLCHAIN=local, so this pin decides the
           # toolchain regardless of what go.mod asks for.
@@ -41,14 +53,14 @@ jobs:
 
       # Also covers formatting: golangci-lint reports gofmt as an issue, so
       # there is no separate gofmt step anywhere in this pipeline.
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
       # Without this a broken release config is found at tag time, which is
       # the worst moment: the tag already exists, so fixing it means deleting
       # and re-pushing a tag that may already have been fetched.
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           version: "~> v2"
           args: check
@@ -63,9 +75,9 @@ jobs:
         # with, and is where a new vet check or a behaviour change shows up.
         go: ["1.26", "1.27"]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
@@ -88,9 +100,9 @@ jobs:
   vuln:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -129,9 +141,9 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -149,7 +161,7 @@ jobs:
             -o "dist/${out}" ./cmd/ilo-fanctl
           ls -l "dist/${out}"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ilo-fanctl-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/

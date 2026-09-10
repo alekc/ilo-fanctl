@@ -1,0 +1,22 @@
+version: 2
+
+updates:
+  # The workflows pin every action to a commit, which is what stops a moved
+  # tag from changing what runs with no diff to review. The cost of a pin is
+  # that it never moves on its own, so the action keeps its own bugs and its
+  # own advisories for as long as nobody looks. This is what looks.
+  #
+  # Monthly rather than weekly: three actions that release a few times a year
+  # do not justify a pull request every Monday, and anything with an advisory
+  # against it arrives sooner than that through Dependabot's security updates,
+  # which run whether or not this file exists.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      # Produces `build(deps): ...`, which is both the Conventional Commits
+      # spelling the rest of the history uses and the `^build\(deps\)` group
+      # the GoReleaser changelog sorts release notes into.
+      prefix: build
+      include: scope

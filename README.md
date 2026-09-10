@@ -66,7 +66,16 @@ dnf install https://github.com/alekc/ilo-fanctl/releases/download/v${VER}/ilo-fa
 Anywhere else, take a static binary (`ilo-fanctl-linux-amd64` or `-arm64`,
 with `SHA256SUMS`, on the releases page) or build it, then install the unit
 from `systemd/` by hand. `go install github.com/alekc/ilo-fanctl/cmd/ilo-fanctl@latest`
-works too and stamps the tag it built.
+works too and stamps the tag it built. None of those create `/etc/ilo-fanctl`
+or put the example config in it the way the packages do, so:
+
+```sh
+VER=0.1.1   # the release you just installed, so the example matches the binary
+
+install -d -m 0750 /etc/ilo-fanctl   # 0750: the BMC private key lives here
+curl -fsSL -o /etc/ilo-fanctl/config.example.yaml \
+  https://raw.githubusercontent.com/alekc/ilo-fanctl/v${VER}/config.example.yaml
+```
 
 Then, however it got there:
 
