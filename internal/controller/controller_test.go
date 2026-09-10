@@ -237,7 +237,7 @@ func newHarness(t *testing.T, body string) *harness {
 
 	col := &fakeCollector{temp: map[string]float64{"/dev/sda": 30, "02-CPU 1": 40}}
 	bmc := newFakeBMC()
-	m := metrics.New()
+	m := metrics.New("test")
 	c := New(path, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), m)
 	c.newBMC = func(config.ILO) bmcClient { return bmc }
 	c.bmc = bmc
