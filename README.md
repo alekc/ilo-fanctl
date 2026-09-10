@@ -47,26 +47,40 @@ runs it on the Proxmox host, not in a VM.
 
 ## Install
 
+A package carries the binary, the systemd unit and the example config, and
+pulls in `smartmontools` and `ipmitool`. It starts nothing: there is no config
+yet, and a thermal daemon without one is a restart loop. An upgrade restarts
+the service only if it was already running.
+
 ```sh
-go build -o /usr/local/bin/ilo-fanctl ./cmd/ilo-fanctl
-install -d -m 0750 /etc/ilo-fanctl
-install -m 0640 config.example.yaml /etc/ilo-fanctl/config.yaml
-install -m 0644 systemd/ilo-fanctl.service /etc/systemd/system/
-systemctl daemon-reload
+VER=0.1.1   # or whatever the latest release is
+
+# Debian, Ubuntu, Proxmox
+curl -fsSLO https://github.com/alekc/ilo-fanctl/releases/download/v${VER}/ilo-fanctl_${VER}_linux_amd64.deb
+apt install ./ilo-fanctl_${VER}_linux_amd64.deb
+
+# RHEL, Rocky, Alma, Fedora
+dnf install https://github.com/alekc/ilo-fanctl/releases/download/v${VER}/ilo-fanctl_${VER}_linux_amd64.rpm
 ```
 
-Edit the config, then validate it before anything runs on it:
+Anywhere else, take a static binary (`ilo-fanctl-linux-amd64` or `-arm64`,
+with `SHA256SUMS`, on the releases page) or build it, then install the unit
+from `systemd/` by hand. `go install github.com/alekc/ilo-fanctl/cmd/ilo-fanctl@latest`
+works too and stamps the tag it built.
+
+Then, however it got there:
 
 ```sh
+cp /etc/ilo-fanctl/config.example.yaml /etc/ilo-fanctl/config.yaml
+# edit it, and put a key the BMC accepts where ilo.key_path points
 ilo-fanctl -config /etc/ilo-fanctl/config.yaml -check
+systemctl enable --now ilo-fanctl
 ```
 
-The unit is installed but not enabled, so nothing starts until you say so:
-
-```sh
-systemctl start ilo-fanctl          # this boot only
-systemctl enable --now ilo-fanctl   # and at every boot from now on
-```
+The shipped unit runs `/usr/bin/ilo-fanctl`, because a package may not install
+into `/usr/local`. To point it at a hand-built binary somewhere else, use a
+drop-in (`systemctl edit ilo-fanctl`) with an empty `ExecStart=` before the
+replacement, rather than editing the unit file a package upgrade will replace.
 
 ### Command line
 

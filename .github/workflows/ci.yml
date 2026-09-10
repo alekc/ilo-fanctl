@@ -45,6 +45,14 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
 
+      # Without this a broken release config is found at tag time, which is
+      # the worst moment: the tag already exists, so fixing it means deleting
+      # and re-pushing a tag that may already have been fetched.
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: check
+
   test:
     runs-on: ubuntu-latest
     strategy:

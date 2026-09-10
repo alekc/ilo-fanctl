@@ -23,8 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The generated notes diff against the previous tag, which is not
-          # in a shallow clone.
+          # The changelog diffs against the previous tag, which is not in a
+          # shallow clone.
           fetch-depth: 0
 
       - uses: actions/setup-go@v7
@@ -32,32 +32,12 @@ jobs:
           go-version: "1.27"
           cache: true
 
-      # Rebuilt rather than pulled from the ci job's artifacts, because those
-      # are stamped with the commit SHA and a released binary should report
-      # the tag when asked for -version.
-      - name: build every target
-        run: |
-          mkdir -p dist
-          for target in linux/amd64 linux/arm64 darwin/arm64; do
-            export GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0
-            out="dist/ilo-fanctl-${GOOS}-${GOARCH}"
-            go build \
-              -trimpath \
-              -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
-              -o "${out}" ./cmd/ilo-fanctl
-          done
-          ( cd dist && sha256sum ilo-fanctl-* > SHA256SUMS )
-          cat dist/SHA256SUMS
-
-      - name: create the release
+      # Everything this used to do by hand (build the matrix, stamp the tag,
+      # checksum, create the release) now lives in .goreleaser.yaml, which
+      # also builds the deb and rpm that the shell loop never could.
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: release --clean
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          flags=(--title "${GITHUB_REF_NAME}" --generate-notes --verify-tag)
-          # A hyphen in the tag means v1.2.0-rc1 and friends, which should not
-          # show up as the latest release.
-          case "${GITHUB_REF_NAME}" in
-            *-*) flags+=(--prerelease) ;;
-          esac
-          gh release create "${GITHUB_REF_NAME}" "${flags[@]}" \
-            dist/ilo-fanctl-* dist/SHA256SUMS
+          GITHUB_TOKEN: ${{ github.token }}

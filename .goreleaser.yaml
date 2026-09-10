@@ -1,0 +1,144 @@
+version: 2
+
+project_name: ilo-fanctl
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: ilo-fanctl
+    main: ./cmd/ilo-fanctl
+    binary: ilo-fanctl
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      # .Tag, not .Version: .Version strips the leading v. The tag is what
+      # ilo_fanctl_build_info reports, and what the toolchain records for a
+      # `go install module@version` build, so this keeps one spelling of a
+      # version everywhere instead of two that differ by a character.
+      - -s -w -X main.version={{ .Tag }}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # No Intel Macs. darwin is a compile check for the maintainer's machine
+      # rather than a deployment target: this needs /dev/ipmi0 and raw block
+      # devices, so it can only ever run on the Linux host that owns them.
+      - goos: darwin
+        goarch: amd64
+
+archives:
+  # Bare binaries rather than tarballs. On a machine with no package manager
+  # worth targeting (TrueNAS, unRAID) the install is curl straight into a bin
+  # directory, and a tarball puts an extract step in front of that for no gain
+  # on one static binary. The packages below carry the docs a tarball would.
+  #
+  # The name template also matches what v0.1.0 and v0.1.1 published by hand,
+  # so existing download URLs and any script built on them keep working.
+  - id: binaries
+    formats:
+      - binary
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+
+nfpms:
+  - id: packages
+    package_name: ilo-fanctl
+    ids:
+      - ilo-fanctl
+    vendor: alekc
+    homepage: https://github.com/alekc/ilo-fanctl
+    maintainer: Alexander Chernov <alexander@chernov.it>
+    description: |-
+      Fan floor controller for HPE ProLiant servers over iLO 4.
+      Drives iLO fan floors from host-side SMART and IPMI temperatures,
+      because iLO's own 08-HD Max sensor under-reports drive temperature
+      badly enough to leave drives hot at an idle fan speed.
+    license: MIT
+    # A system daemon. Empty here makes lintian complain.
+    section: admin
+    formats:
+      - deb
+      - rpm
+    # The FHS reserves /usr/local for the local administrator and Debian
+    # policy forbids a package writing there, so a packaged install cannot use
+    # the /usr/local/bin path the manual instructions used to give.
+    bindir: /usr/bin
+    # smartmontools and ipmitool are named the same everywhere and neither is
+    # optional: a sensor group with no collector behind it reads blind. The
+    # third one is /bin/kill, for the unit's ExecReload. procps is Priority
+    # important rather than Essential, so it is present on every real host and
+    # absent from a minimal image, which is the combination that makes an
+    # undeclared dependency ship and then fail somewhere else. Debian calls it
+    # procps and RHEL calls it procps-ng, hence the split.
+    overrides:
+      deb:
+        dependencies:
+          - smartmontools
+          - ipmitool
+          - procps
+      rpm:
+        dependencies:
+          - smartmontools
+          - ipmitool
+          - procps-ng
+    contents:
+      - src: systemd/ilo-fanctl.service
+        dst: /usr/lib/systemd/system/ilo-fanctl.service
+
+      # The example, never config.yaml. A package that ships the real config
+      # path owns it, and an upgrade would eventually overwrite a live one,
+      # which for this tool means silently reverting somebody's fan curves.
+      - src: config.example.yaml
+        dst: /etc/ilo-fanctl/config.example.yaml
+
+      # 0750 because the BMC private key lives here.
+      - dst: /etc/ilo-fanctl
+        type: dir
+        file_info:
+          mode: 0750
+
+      - src: README.md
+        dst: /usr/share/doc/ilo-fanctl/README.md
+      - src: docs/configuration.md
+        dst: /usr/share/doc/ilo-fanctl/configuration.md
+      - src: docs/observability.md
+        dst: /usr/share/doc/ilo-fanctl/observability.md
+    scripts:
+      postinstall: packaging/postinstall.sh
+      preremove: packaging/preremove.sh
+      postremove: packaging/postremove.sh
+
+checksum:
+  # Same asset name the hand-rolled workflow published, so the verification
+  # step in the README does not change between v0.1.1 and this.
+  name_template: SHA256SUMS
+
+changelog:
+  # `git`, not `github`. The GitHub compare API 404s for a tag created by the
+  # same run that is asking about it, which fails the release at the last
+  # step; git log against the previous tag is local and always there.
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^feat'
+      order: 0
+    - title: Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Dependencies
+      regexp: '^build\(deps\)'
+      order: 2
+    - title: Other
+      order: 99
+
+release:
+  # A tag with a hyphen in it is v1.2.0-rc1 and friends, which should not
+  # become the latest release. Same rule the hand-rolled workflow had.
+  prerelease: auto
