@@ -12,9 +12,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           # setup-go forces GOTOOLCHAIN=local, so this pin decides the
           # toolchain regardless of what go.mod asks for.
@@ -64,9 +64,9 @@ jobs:
           - goos: darwin
             goarch: arm64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: "1.25"
           cache: true
@@ -84,7 +84,7 @@ jobs:
             -o "dist/${out}" ./cmd/ilo-fanctl
           ls -l "dist/${out}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ilo-fanctl-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/
