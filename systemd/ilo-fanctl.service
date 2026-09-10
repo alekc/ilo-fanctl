@@ -18,7 +18,19 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/ilo-fanctl -config /etc/ilo-fanctl/config.yaml
+# /usr/bin, not /usr/local/bin: this same unit ships inside the deb and rpm,
+# and the FHS reserves /usr/local for the local administrator, so a package
+# may not install there. Building by hand into a different path does not mean
+# editing this file, it means a drop-in:
+#
+#   systemctl edit ilo-fanctl
+#   [Service]
+#   ExecStart=
+#   ExecStart=/usr/local/bin/ilo-fanctl -config /etc/ilo-fanctl/config.yaml
+#
+# The empty ExecStart= is required; without it systemd appends rather than
+# replaces, and refuses to start a Type=simple unit with two of them.
+ExecStart=/usr/bin/ilo-fanctl -config /etc/ilo-fanctl/config.yaml
 
 # The config is polled and picked up within a few seconds anyway; this makes
 # an edit take effect immediately. A config that fails validation is rejected

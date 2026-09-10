@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -25,8 +26,36 @@ import (
 	"github.com/alekc/ilo-fanctl/internal/tui"
 )
 
-// version is set at build time with -ldflags "-X main.version=...".
+// version is set at build time with -ldflags "-X main.version=...". It has to
+// stay a plain string constant assignment, because -X only writes to one of
+// those, which is why the fallback below is in init rather than here.
 var version = "dev"
+
+func init() { version = resolveVersion(version, debug.ReadBuildInfo) }
+
+// resolveVersion fills in a version for builds that carry no ldflags.
+//
+// A binary from `go install <module>@<version>` gets none, so without this it
+// reports "dev", and so does its ilo_fanctl_build_info series, which leaves
+// every go-install host indistinguishable from every other one in the metric
+// that exists to tell them apart. The toolchain does record the module
+// version for those builds, and it is the real tag.
+//
+// A plain `go build` in a checkout records "(devel)" instead, which says no
+// more than "dev" already does, so that case keeps whatever it had.
+//
+// read is a parameter only so the tests can supply the build info that a test
+// binary cannot otherwise have; production passes debug.ReadBuildInfo.
+func resolveVersion(current string, read func() (*debug.BuildInfo, bool)) string {
+	if current != "dev" {
+		return current
+	}
+	info, ok := read()
+	if !ok || info == nil || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return current
+	}
+	return info.Main.Version
+}
 
 func main() {
 	// The subcommand comes first, as it does for go itself, so the flag set

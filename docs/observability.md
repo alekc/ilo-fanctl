@@ -41,7 +41,7 @@ the label is the point. Finding hosts left behind by a rollout is a query
 rather than a round of SSH:
 
 ```promql
-ilo_fanctl_build_info{version!="v0.1.0"}
+count by (version) (ilo_fanctl_build_info)
 ```
 
 A build older than the release that fixed the SSH session teardown matters
