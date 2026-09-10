@@ -37,11 +37,17 @@ own value is removed as soon as the hold expires. A stale temperature that reads
 as a cool component is the most dangerous thing this program could publish.
 
 `build_info` and `config_info` are always 1, so the value carries nothing and
-the label is the point. Finding hosts left behind by a rollout is a query
-rather than a round of SSH:
+the label is the point. A rollout is then two queries rather than a round of
+SSH, one for the shape of it and one for the stragglers:
 
 ```promql
+# how many hosts on each version
 count by (version) (ilo_fanctl_build_info)
+
+# which hosts are not on the one being rolled out. Keep the whole series
+# rather than aggregating: `instance` is the answer, and `by (version)`
+# above deliberately throws it away.
+ilo_fanctl_build_info{version!="v0.1.1"}
 ```
 
 A build older than the release that fixed the SSH session teardown matters
