@@ -90,7 +90,7 @@ func main() {
 func runDaemon(cfgPath string, cfg *config.Config, level slog.Level, dryRun bool) {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
-	m := metrics.New()
+	m := metrics.New(version)
 	ctrl := controller.New(cfgPath, cfg, log, m)
 	ctrl.SetDryRun(dryRun)
 	if dryRun {
@@ -172,7 +172,7 @@ func runTUI(cfgPath string, cfg *config.Config, level slog.Level, dryRun, view b
 		return app.Run(ctx)
 	}
 
-	m := metrics.New()
+	m := metrics.New(version)
 	ctrl := controller.New(cfgPath, cfg, log, m)
 	ctrl.SetDryRun(dryRun)
 	app := tui.NewApp(cfg, sink, ctrl, nil)

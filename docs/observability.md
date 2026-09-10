@@ -28,12 +28,26 @@ the mutual exclusion that stops two processes driving the same BMC.
 | `ilo_fanctl_last_successful_cycle_timestamp_seconds` | Staleness |
 | `ilo_fanctl_config_info{checksum}` | Which config is actually running |
 | `ilo_fanctl_config_loaded_timestamp_seconds` | When that config was loaded |
+| `ilo_fanctl_build_info{version}` | Which build is actually running |
 | `ilo_fanctl_start_time_seconds` | Process start, for uptime |
 
 A gauge here never holds a value that was not measured. When a sensor group goes
 unreadable its per-sensor series are removed rather than frozen, and the group's
 own value is removed as soon as the hold expires. A stale temperature that reads
 as a cool component is the most dangerous thing this program could publish.
+
+`build_info` and `config_info` are always 1, so the value carries nothing and
+the label is the point. Finding hosts left behind by a rollout is a query
+rather than a round of SSH:
+
+```promql
+ilo_fanctl_build_info{version!="v0.1.0"}
+```
+
+A build older than the release that fixed the SSH session teardown matters
+more than most version drift, because that daemon stays `active (running)`
+while writing into a dead pipe. See Detecting a reverted ilo4_unlock patch in
+the README for the other failure that looks healthy from the outside.
 
 ## Alerts
 

@@ -40,12 +40,19 @@ type Metrics struct {
 	ReloadsTotal     *prometheus.CounterVec
 	ConfigLoadedUnix prometheus.Gauge
 	ConfigInfo       *prometheus.GaugeVec
+	BuildInfo        *prometheus.GaugeVec
 	StartTimeUnix    prometheus.Gauge
 	BlindGroups      prometheus.Gauge
 }
 
 // New builds the registry and every collector on it.
-func New() *Metrics {
+//
+// version is a parameter rather than something a caller sets afterwards
+// because it can then never be missing: the compiler asks every call site for
+// it. A daemon whose /metrics does not say what it was built from is one you
+// have to SSH to in order to answer "is this host still on the old binary",
+// which is exactly the question worth answering from Prometheus.
+func New(version string) *Metrics {
 	reg := prometheus.NewRegistry()
 	m := &Metrics{
 		reg: reg,
@@ -130,6 +137,10 @@ func New() *Metrics {
 			Name: "ilo_fanctl_config_info",
 			Help: "Always 1, labelled with the SHA-256 of the config the daemon is actually running.",
 		}, []string{"checksum"}),
+		BuildInfo: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ilo_fanctl_build_info",
+			Help: "Always 1, labelled with the version the daemon was built from.",
+		}, []string{"version"}),
 		StartTimeUnix: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "ilo_fanctl_start_time_seconds",
 			Help: "Unix time the process started.",
@@ -145,8 +156,10 @@ func New() *Metrics {
 		m.CycleTotal, m.CycleErrors, m.WritesTotal, m.MismatchTotal, m.SensorErrors,
 		m.CriticalActive, m.LastCycleUnix, m.CycleSeconds,
 		m.ILOConnected, m.ControlEffective,
-		m.ReloadsTotal, m.ConfigLoadedUnix, m.ConfigInfo, m.StartTimeUnix, m.BlindGroups,
+		m.ReloadsTotal, m.ConfigLoadedUnix, m.ConfigInfo, m.BuildInfo,
+		m.StartTimeUnix, m.BlindGroups,
 	)
+	m.BuildInfo.WithLabelValues(version).Set(1)
 	m.StartTimeUnix.SetToCurrentTime()
 	// NaN, not 0, until a floor has had a full interval to take effect. A
 	// plain gauge is always present, so 0 here would assert "the BMC is
