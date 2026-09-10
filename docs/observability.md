@@ -18,7 +18,8 @@ the mutual exclusion that stops two processes driving the same BMC.
 | `ilo_fanctl_fan_observed_percent{fan,label}` | Speed the BMC reports |
 | `ilo_fanctl_fan_writes_total` | Floor commands sent to the BMC |
 | `ilo_fanctl_control_effective` | 1 when the floors are being honoured, NaN until known |
-| `ilo_fanctl_readback_mismatch_total{fan}` | Commanded floor not reflected |
+| `ilo_fanctl_readback_mismatch_total{fan}` | Commanded floor not reflected, ever |
+| `ilo_fanctl_fan_mismatch{fan,label}` | 1 while that fan is below its floor now, NaN until it can be judged |
 | `ilo_fanctl_blind_sensor_groups` | Groups running on a held or fallback value |
 | `ilo_fanctl_critical_active` | 1 while a critical threshold is exceeded |
 | `ilo_fanctl_ilo_connected` | 1 while the SSH session is up |
@@ -36,6 +37,22 @@ unreadable its per-sensor series are removed rather than frozen, and the group's
 own value is removed as soon as the hold expires. A stale temperature that reads
 as a cool component is the most dangerous thing this program could publish.
 
+`fan_mismatch` is a verdict, not a measurement, and it is the one to read rather
+than deriving your own from `fan_applied_percent` and `fan_observed_percent`. A
+floor that went up seconds ago has not reached the fan yet, so those two gauges
+genuinely disagree for a cycle without anything being wrong, and the daemon
+judges against the floor that has been in effect for a full interval instead.
+That floor is not exported, so the subtraction cannot be done correctly from
+outside. `readback_mismatch_total` answers a different question: it counts
+whether this ever happened, where the gauge says whether it is happening now.
+
+There is a series for every configured fan from the first judged cycle
+onwards, healthy or not, so the family being absent means the daemon predates
+it rather than that nothing is wrong. That distinction is what lets a reader
+tell an old daemon apart from a current one with no fan to name, which matters
+because `control_effective` and these gauges are written a moment apart and a
+scrape can land between them.
+
 `build_info` and `config_info` are always 1, so the value carries nothing and
 the label is the point. A rollout is then two queries rather than a round of
 SSH, one for the shape of it and one for the stragglers:
@@ -47,7 +64,7 @@ count by (version) (ilo_fanctl_build_info)
 # which hosts are not on the one being rolled out. Keep the whole series
 # rather than aggregating: `instance` is the answer, and `by (version)`
 # above deliberately throws it away.
-ilo_fanctl_build_info{version!="v0.1.1"}
+ilo_fanctl_build_info{version!="v0.2.0"}
 ```
 
 A build older than the release that fixed the SSH session teardown matters

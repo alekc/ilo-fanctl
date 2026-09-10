@@ -331,6 +331,11 @@ func (c *Controller) cycle(ctx context.Context) {
 		ConfigChecksum: cfg.Checksum,
 		Interval:       cfg.Interval.Duration,
 		StartedAt:      c.startedAt,
+		// verify judges every configured fan and records the verdict on the
+		// fan, in the same pass that decides Effective, so the two can never
+		// be seen apart here and the UI's unnamed-mismatch fallback is never
+		// the right reading of this snapshot.
+		FanVerdictsKnown: true,
 	}
 	// Published even when the cycle fails part way, so the UI shows a BMC that
 	// has gone away rather than freezing on the last good reading.
@@ -867,23 +872,37 @@ func (c *Controller) verify(ctx context.Context, cfg *config.Config, bmc bmcClie
 	effective := true
 	judged := false
 	for _, f := range cfg.Fans {
+		idx := fmt.Sprint(f.Index)
 		observed, ok := speeds[f.Index]
 		if !ok {
+			// Nothing was read for this fan, so there is no verdict to publish
+			// about it. NaN rather than 0 for the same reason the effective
+			// gauge starts there: an absence of evidence must not read as an
+			// assurance of health.
+			c.m.FanMismatch.WithLabelValues(idx, f.Label).Set(state.Unknown())
 			continue
 		}
-		c.m.FanObservedPct.WithLabelValues(fmt.Sprint(f.Index), f.Label).Set(observed)
+		c.m.FanObservedPct.WithLabelValues(idx, f.Label).Set(observed)
 
 		want, ok := c.verifiableFloorLocked(f.Index)
 		if !ok {
+			c.m.FanMismatch.WithLabelValues(idx, f.Label).Set(state.Unknown())
 			continue
 		}
 		judged = true
 		// The BMC reports its own desired speed, which is the higher of our
 		// floor and whatever its curve wants. So observed above the floor is
 		// normal and expected; only observed below it is a problem.
-		if state.Mismatched(want, observed) {
+		bad := state.Mismatched(want, observed)
+		// Published, not left to be recomputed downstream. The floor this was
+		// judged against is the settled one, which never leaves this process,
+		// so a reader holding only the applied and observed gauges cannot
+		// arrive at the same answer and will call a fan that is merely still
+		// spinning up a reverted ilo4_unlock patch.
+		c.m.FanMismatch.WithLabelValues(idx, f.Label).Set(boolToFloat(bad))
+		if bad {
 			effective = false
-			c.m.MismatchTotal.WithLabelValues(fmt.Sprint(f.Index)).Inc()
+			c.m.MismatchTotal.WithLabelValues(idx).Inc()
 			c.mismatches.Add(1)
 			c.log.Error("commanded floor is not being honoured by the BMC",
 				"fan", f.Index, "label", f.Label,

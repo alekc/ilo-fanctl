@@ -91,26 +91,49 @@ func (s *Scraper) build(fams map[string]*dto.MetricFamily) state.Snapshot {
 	// "not effective". Collapsing the two would make a freshly started daemon
 	// look like one whose writes are being ignored.
 	effective := single(fams, "ilo_fanctl_control_effective")
+	// Whether this daemon publishes a per-fan verdict at all, which is the only
+	// thing separating a version too old to name the offending fans from a
+	// current one that named none because none is offending. The UI has to tell
+	// those apart: control_effective and the per-fan gauges are written a few
+	// instructions apart, and a scrape lands between them often enough to
+	// matter. A GaugeVec with no children publishes no family at all, but the
+	// daemon writes every fan's verdict before it writes control_effective, so
+	// a current daemon that has one has the other.
+	_, perFanVerdicts := fams["ilo_fanctl_fan_mismatch"]
 	snap := state.Snapshot{
-		At:             time.Now(),
-		Mode:           state.ModeViewing,
-		BMCHost:        cfg.ILO.Host,
-		Interval:       cfg.Interval.Duration,
-		ConfigChecksum: label(fams, "ilo_fanctl_config_info", "checksum"),
-		Connected:      single(fams, "ilo_fanctl_ilo_connected") == 1,
-		Effective:      effective == 1,
-		EffectiveKnown: state.Known(effective),
-		Critical:       single(fams, "ilo_fanctl_critical_active") == 1,
-		BlindGroups:    int(zeroNaN(single(fams, "ilo_fanctl_blind_sensor_groups"))),
-		Writes:         zeroNaN(single(fams, "ilo_fanctl_fan_writes_total")),
-		Mismatches:     zeroNaN(sum(fams, "ilo_fanctl_readback_mismatch_total")),
-		Cycles:         zeroNaN(single(fams, "ilo_fanctl_cycles_total")),
-		LastCycle:      unixTime(single(fams, "ilo_fanctl_last_successful_cycle_timestamp_seconds")),
-		StartedAt:      unixTime(single(fams, "ilo_fanctl_start_time_seconds")),
+		At:               time.Now(),
+		Mode:             state.ModeViewing,
+		BMCHost:          cfg.ILO.Host,
+		Interval:         cfg.Interval.Duration,
+		ConfigChecksum:   label(fams, "ilo_fanctl_config_info", "checksum"),
+		Connected:        single(fams, "ilo_fanctl_ilo_connected") == 1,
+		Effective:        effective == 1,
+		EffectiveKnown:   state.Known(effective),
+		FanVerdictsKnown: perFanVerdicts,
+		Critical:         single(fams, "ilo_fanctl_critical_active") == 1,
+		BlindGroups:      int(zeroNaN(single(fams, "ilo_fanctl_blind_sensor_groups"))),
+		Writes:           zeroNaN(single(fams, "ilo_fanctl_fan_writes_total")),
+		Mismatches:       zeroNaN(sum(fams, "ilo_fanctl_readback_mismatch_total")),
+		Cycles:           zeroNaN(single(fams, "ilo_fanctl_cycles_total")),
+		LastCycle:        unixTime(single(fams, "ilo_fanctl_last_successful_cycle_timestamp_seconds")),
+		StartedAt:        unixTime(single(fams, "ilo_fanctl_start_time_seconds")),
 	}
 
 	applied := byLabel(fams, "ilo_fanctl_fan_applied_percent", "fan")
 	observed := byLabel(fams, "ilo_fanctl_fan_observed_percent", "fan")
+	// The daemon's verdict, taken as given rather than recomputed from the two
+	// gauges above. It judges each fan against the floor that has been in
+	// effect for a full interval, and that floor is not exported, so comparing
+	// applied against observed here is not a cheaper route to the same answer,
+	// it is a different and wrong one: a fan told to go from 12 to 55 percent
+	// reads as below its floor for one cycle while it spins up. Doing exactly
+	// that painted all six fans of the reference machine as a reverted
+	// ilo4_unlock patch every time the drives warmed, which is the one alarm in
+	// this program that has to mean what it says.
+	//
+	// Anything other than 1 is not a mismatch, and that includes the NaN the
+	// daemon publishes for a fan it could not fairly judge.
+	mismatch := byLabel(fams, "ilo_fanctl_fan_mismatch", "fan")
 	for _, f := range cfg.Fans {
 		key := strconv.Itoa(f.Index)
 		sf := state.Fan{
@@ -118,8 +141,8 @@ func (s *Scraper) build(fams map[string]*dto.MetricFamily) state.Snapshot {
 			Label:    f.Label,
 			Floor:    lookup(applied, key),
 			Observed: lookup(observed, key),
+			Mismatch: lookup(mismatch, key) == 1,
 		}
-		sf.Mismatch = state.Mismatched(sf.Floor, sf.Observed)
 		snap.Fans = append(snap.Fans, sf)
 	}
 
