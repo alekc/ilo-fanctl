@@ -111,6 +111,19 @@ func (s *Scraper) build(fams map[string]*dto.MetricFamily) state.Snapshot {
 
 	applied := byLabel(fams, "ilo_fanctl_fan_applied_percent", "fan")
 	observed := byLabel(fams, "ilo_fanctl_fan_observed_percent", "fan")
+	// The daemon's verdict, taken as given rather than recomputed from the two
+	// gauges above. It judges each fan against the floor that has been in
+	// effect for a full interval, and that floor is not exported, so comparing
+	// applied against observed here is not a cheaper route to the same answer,
+	// it is a different and wrong one: a fan told to go from 12 to 55 percent
+	// reads as below its floor for one cycle while it spins up. Doing exactly
+	// that painted all six fans of the reference machine as a reverted
+	// ilo4_unlock patch every time the drives warmed, which is the one alarm in
+	// this program that has to mean what it says.
+	//
+	// Anything other than 1 is not a mismatch, and that includes the NaN the
+	// daemon publishes for a fan it could not fairly judge.
+	mismatch := byLabel(fams, "ilo_fanctl_fan_mismatch", "fan")
 	for _, f := range cfg.Fans {
 		key := strconv.Itoa(f.Index)
 		sf := state.Fan{
@@ -118,8 +131,8 @@ func (s *Scraper) build(fams map[string]*dto.MetricFamily) state.Snapshot {
 			Label:    f.Label,
 			Floor:    lookup(applied, key),
 			Observed: lookup(observed, key),
+			Mismatch: lookup(mismatch, key) == 1,
 		}
-		sf.Mismatch = state.Mismatched(sf.Floor, sf.Observed)
 		snap.Fans = append(snap.Fans, sf)
 	}
 

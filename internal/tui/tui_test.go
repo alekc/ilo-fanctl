@@ -888,3 +888,39 @@ func TestTheLinkSaysConnectingWhileTheHandshakeIsOpen(t *testing.T) {
 		t.Errorf("read-only header = %q, want no claim about a handshake", got)
 	}
 }
+
+// A TUI newer than the daemon it is attached to must not go quiet about the one
+// failure it exists to report.
+//
+// ilo_fanctl_fan_mismatch is what names the offending fans, and a daemon
+// predating it does not publish that series, so every fan scrapes back as
+// honoured. ilo_fanctl_control_effective is older and still says the floors are
+// being ignored, so the alert is raised from that instead, without the fan list
+// it cannot have.
+func TestMismatchIsStillReportedByADaemonTooOldToNameTheFans(t *testing.T) {
+	m := busyModel(120, 40)
+	m.snap.Fans = []state.Fan{
+		{Index: 0, Label: "Fan 1", Floor: 26, Observed: 12},
+		{Index: 1, Label: "Fan 2", Floor: 26, Observed: 12},
+	}
+	m.snap.EffectiveKnown, m.snap.Effective = true, false
+
+	var found bool
+	for _, a := range m.alerts(m.w) {
+		if strings.Contains(ansi.ReplaceAllString(a, ""), "ilo4_unlock") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no reverted-patch alert while control_effective says the floors are ignored")
+	}
+
+	// And it must stay quiet when that gauge has no verdict to give, which is
+	// every daemon for the first interval after it starts.
+	m.snap.EffectiveKnown = false
+	for _, a := range m.alerts(m.w) {
+		if strings.Contains(ansi.ReplaceAllString(a, ""), "ilo4_unlock") {
+			t.Error("reverted-patch alert raised while effectiveness is still unknown")
+		}
+	}
+}

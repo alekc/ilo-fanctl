@@ -48,6 +48,61 @@ func TestSnapshotSurvivesTheMetricsRoundTrip(t *testing.T) {
 			},
 		},
 		{
+			// The one cycle in which a floor has been raised and the fans have
+			// not reached it yet. The loop refuses to judge that, so a scraper
+			// must refuse too, and until ilo_fanctl_fan_mismatch existed it
+			// could not: it recomputed the verdict from the applied and
+			// observed gauges, neither of which knows a floor is seconds old,
+			// and called every fan a reverted ilo4_unlock patch.
+			//
+			// Every case above starts from a cold daemon where nothing has
+			// settled and no fan is judged at all, so all of them agree on
+			// Mismatch by never forming an opinion. This is the only one that
+			// puts a real verdict on the wire.
+			name: "a floor raised this cycle, fans still spinning up",
+			setup: func(h *harness) {
+				h.bmc.spinUpLag = true
+				h.col.set("/dev/sda", 40)
+				h.cycle()
+				h.col.set("/dev/sda", 55) // demands a materially higher floor
+			},
+			check: func(t *testing.T, s state.Snapshot) {
+				for _, f := range s.Fans {
+					if f.Mismatch {
+						t.Fatalf("fan %d reported as ignoring a floor it was given seconds ago", f.Index)
+					}
+				}
+			},
+		},
+		{
+			// The other half of the pair above, and the reason it is not enough
+			// on its own. A scraper that read the new gauge wrongly, or ignored
+			// it and hardcoded false, would satisfy the spinning-up case
+			// perfectly while going blind to the failure the whole read-back
+			// exists to catch. This is the case that has to stay red.
+			name: "a reverted patch, with the BMC ignoring every floor",
+			setup: func(h *harness) {
+				h.bmc.spinUpLag = true
+				h.col.set("/dev/sda", 55)
+				h.cycle()
+
+				// From here the BMC accepts every command and moves nothing.
+				h.bmc.mu.Lock()
+				h.bmc.ignoreWrites = true
+				h.bmc.reported[0] = 9
+				h.bmc.reported[1] = 11
+				h.bmc.mu.Unlock()
+				h.cycle()
+			},
+			check: func(t *testing.T, s state.Snapshot) {
+				for _, f := range s.Fans {
+					if !f.Mismatch {
+						t.Fatalf("fan %d reads as honoured while the BMC ignores every write", f.Index)
+					}
+				}
+			},
+		},
+		{
 			// The degraded case is the one worth carrying across the wire
 			// intact: a group running on a held value looks identical to a
 			// healthy one unless the state is exported alongside the number.

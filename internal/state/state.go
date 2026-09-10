@@ -28,15 +28,26 @@ func Known(v float64) bool { return !math.IsNaN(v) }
 // slack absorbs both without hiding a floor that is being ignored outright,
 // which is what this check exists to catch.
 //
-// It lives here rather than in the controller because the same judgement has
-// to be made twice: by the loop against speeds it just read, and by the TUI
-// against two gauges it scraped from a daemon it is not running.
+// The tolerance is smaller in practice than it looks. The CLP's whole-percent
+// rounding alone eats most of a point at the speeds this runs at, so what is
+// left over for a fan that is genuinely still moving is closer to one point
+// than to two.
 const ReadbackTolerancePct = 2.0
 
 // Mismatched reports whether the BMC is running a fan below the floor that was
 // commanded for it. That is the reverted-patch signal: an HPE firmware upgrade
 // removes the ilo4_unlock patch without making the write fail, so this gap is
 // the only place it shows up.
+//
+// The controller is the only caller, and that is deliberate rather than
+// incidental. The floor passed here is the one that has been in effect for a
+// full interval, which only the loop knows, so a fan just told to go from 12 to
+// 55 percent is judged against 12 and not called a failure for spinning up.
+// Nothing outside the process can reproduce that, which is why the verdict is
+// exported as ilo_fanctl_fan_mismatch instead of the inputs to it. The TUI used
+// to call this itself on the applied and observed gauges, and reported all six
+// fans of the reference machine as an ignored floor every time the drives
+// warmed enough to raise one.
 func Mismatched(floor, observed float64) bool {
 	return Known(floor) && Known(observed) && observed < floor-ReadbackTolerancePct
 }

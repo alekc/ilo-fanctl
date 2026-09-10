@@ -937,6 +937,14 @@ func (m model) alerts(width int) []string {
 		add(sBad, fmt.Sprintf(
 			"the BMC is running %s below the commanded floor; an HPE firmware upgrade reverts the ilo4_unlock patch",
 			strings.Join(bad, ", ")))
+	} else if s.EffectiveKnown && !s.Effective {
+		// The daemon says its floors are not being honoured, yet named no fan.
+		// The only way to reach here is scraping one older than
+		// ilo_fanctl_fan_mismatch, which published the verdict for the machine
+		// and never per fan. Report it without the list rather than not at all:
+		// this alert going quiet is the failure it exists to prevent, and
+		// trading a wrong fan list for total silence is not an improvement.
+		add(sBad, "the BMC is not honouring the commanded floors; an HPE firmware upgrade reverts the ilo4_unlock patch")
 	}
 	if s.Err != "" {
 		add(sBad, "last cycle failed: "+s.Err)

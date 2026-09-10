@@ -27,6 +27,7 @@ type Metrics struct {
 	CurveDemandPct   *prometheus.GaugeVec
 	FanAppliedPct    *prometheus.GaugeVec
 	FanObservedPct   *prometheus.GaugeVec
+	FanMismatch      *prometheus.GaugeVec
 	CycleTotal       prometheus.Counter
 	CycleErrors      *prometheus.CounterVec
 	WritesTotal      prometheus.Counter
@@ -83,6 +84,15 @@ func New(version string) *Metrics {
 		FanObservedPct: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "ilo_fanctl_fan_observed_percent",
 			Help: "Fan speed the BMC reports, read back from the SMASH CLP.",
+		}, []string{"fan", "label"}),
+		// The verdict itself, not the two numbers it is drawn from. Nobody
+		// outside this process can reach the same answer: it is judged against
+		// the floor that has been in effect for a full interval, and that floor
+		// is never exported, so subtracting the two gauges above calls every
+		// fan a failure for the one cycle after a floor goes up.
+		FanMismatch: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "ilo_fanctl_fan_mismatch",
+			Help: "1 while the BMC is running this fan below its commanded floor, NaN until the fan can fairly be judged.",
 		}, []string{"fan", "label"}),
 		CycleTotal: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "ilo_fanctl_cycles_total",
@@ -152,7 +162,7 @@ func New(version string) *Metrics {
 	}
 	reg.MustRegister(
 		m.SensorCelsius, m.GroupCelsius, m.GroupBlind, m.GroupHeld, m.CurveDemandPct,
-		m.FanAppliedPct, m.FanObservedPct,
+		m.FanAppliedPct, m.FanObservedPct, m.FanMismatch,
 		m.CycleTotal, m.CycleErrors, m.WritesTotal, m.MismatchTotal, m.SensorErrors,
 		m.CriticalActive, m.LastCycleUnix, m.CycleSeconds,
 		m.ILOConnected, m.ControlEffective,
