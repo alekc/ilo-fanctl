@@ -39,7 +39,7 @@ everything else from IPMI, and only adjusts the floor.
   **An HPE firmware upgrade silently reverts the patch.** See Detecting a
   reverted ilo4_unlock patch below.
 - `smartctl` and `ipmitool` on the host.
-- Go 1.25 or later to build.
+- Go 1.26 or later to build.
 
 It must run on the machine that physically owns the drives and `/dev/ipmi0`. On
 a virtualised host that is the hypervisor, not a guest: the reference machine
