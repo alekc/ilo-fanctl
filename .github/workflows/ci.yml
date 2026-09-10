@@ -87,11 +87,17 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      # Deliberately unpinned and deliberately blocking. This talks SSH to a
-      # BMC with x/crypto, and a disclosure in that path is something to hear
-      # about on the next run rather than at the next dependency bump.
+      # Deliberately blocking: this talks SSH to a BMC with x/crypto, and a
+      # disclosure in that path is something to hear about on the next run
+      # rather than at the next dependency bump.
+      #
+      # Pinning the tool costs nothing in freshness, because govulncheck
+      # fetches the vulnerability database from vuln.go.dev at run time
+      # whatever version of itself is running. What @latest would buy instead
+      # is executing whatever was published to the module an hour ago, on
+      # every pull request, which is a supply chain hole with no upside.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
   build:
     runs-on: ubuntu-latest
