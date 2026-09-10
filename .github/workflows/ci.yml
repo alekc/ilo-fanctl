@@ -4,12 +4,30 @@ on:
   push:
     branches: [master]
   pull_request:
+  # Callable, so the release workflow validates a tag with exactly the checks
+  # a pull request gets rather than a second copy of them that can drift.
+  workflow_call:
 
 permissions:
   contents: read
 
+# A pull request that gets a second push has nothing to learn from finishing
+# the first run. Pushes to master and tags are left alone, so every commit
+# that lands keeps a complete result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The newest toolchain, used everywhere except the test matrix below.
+  GO_VERSION: "1.27"
+  # Pinned to a patch, not a minor: a linter that updates itself turns an
+  # unrelated pull request red for a check that was not in the tree when it
+  # was opened.
+  GOLANGCI_LINT_VERSION: v2.13.2
+
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -18,29 +36,62 @@ jobs:
         with:
           # setup-go forces GOTOOLCHAIN=local, so this pin decides the
           # toolchain regardless of what go.mod asks for.
-          go-version: "1.25"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - name: gofmt
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "these files need gofmt:"
-            echo "$unformatted"
-            exit 1
-          fi
+      # Also covers formatting: golangci-lint reports gofmt as an issue, so
+      # there is no separate gofmt step anywhere in this pipeline.
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 1.26 is the floor go.mod declares and the README promises, so it is
+        # tested rather than assumed; 1.27 is what people will actually build
+        # with, and is where a new vet check or a behaviour change shows up.
+        go: ["1.26", "1.27"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
 
       - name: vet
         run: go vet ./...
 
       - name: test
-        run: go test -race -count=1 ./...
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: coverage
+        run: go tool cover -func=coverage.out | tail -1
 
       - name: validate the example config
         run: |
           ssh-keygen -t rsa -b 2048 -m PEM -f /tmp/id_rsa -N '' -q
           sed 's#/etc/ilo-fanctl/id_rsa#/tmp/id_rsa#' config.example.yaml > /tmp/config.yaml
           go run ./cmd/ilo-fanctl -config /tmp/config.yaml -check
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Deliberately unpinned and deliberately blocking. This talks SSH to a
+      # BMC with x/crypto, and a disclosure in that path is something to hear
+      # about on the next run rather than at the next dependency bump.
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   build:
     runs-on: ubuntu-latest
@@ -68,7 +119,7 @@ jobs:
 
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: ${{ env.GO_VERSION }}
           cache: true
 
       - name: build
