@@ -1189,8 +1189,8 @@ func (m model) curves() string {
 		if c.Fallback {
 			note, st = "sensor lost, using the fixed fallback", sWarn
 		}
-		b.WriteString(fmt.Sprintf("  %-*s %-*s %8s %8s  %s\n",
-			nw, c.Name, sw, c.Sensor, celsius(c.Temp), pct(c.Demand), st.Render(note)))
+		fmt.Fprintf(&b, "  %-*s %-*s %8s %8s  %s\n",
+			nw, c.Name, sw, c.Sensor, celsius(c.Temp), pct(c.Demand), st.Render(note))
 	}
 	return b.String()
 }

@@ -1,0 +1,23 @@
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    staticcheck:
+      checks:
+        - all
+        # Spelling an embedded field out is a deliberate choice here, not an
+        # oversight: ssh.ClientConfig embeds ssh.Config, and clientCfg.Config
+        # .KeyExchanges says which struct the field belongs to where the
+        # promoted form does not.
+        - -QF1008
+  exclusions:
+    presets:
+      # Deferred Close on a cleanup path and fmt.Fprint to a buffer or to
+      # stderr. There is nothing to do with either error, and handling them
+      # would be noise around the failure that actually matters.
+      - std-error-handling
+
+formatters:
+  enable:
+    - gofmt
