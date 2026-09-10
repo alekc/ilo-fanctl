@@ -897,30 +897,61 @@ func TestTheLinkSaysConnectingWhileTheHandshakeIsOpen(t *testing.T) {
 // honoured. ilo_fanctl_control_effective is older and still says the floors are
 // being ignored, so the alert is raised from that instead, without the fan list
 // it cannot have.
-func TestMismatchIsStillReportedByADaemonTooOldToNameTheFans(t *testing.T) {
-	m := busyModel(120, 40)
-	m.snap.Fans = []state.Fan{
-		{Index: 0, Label: "Fan 1", Floor: 26, Observed: 12},
-		{Index: 1, Label: "Fan 2", Floor: 26, Observed: 12},
+// The machine-wide fallback: control_effective says the floors are ignored
+// while no fan is flagged. Whether that is worth an alarm turns entirely on
+// whether the source could have flagged one.
+func TestUnnamedMismatchAlertTracksWhoCouldHaveNamedTheFan(t *testing.T) {
+	cases := []struct {
+		name             string
+		fanVerdictsKnown bool
+		effectiveKnown   bool
+		effective        bool
+		want             bool
+	}{
+		{
+			// A daemon predating ilo_fanctl_fan_mismatch. It knows the floors
+			// are being ignored and has no way to say which fan.
+			name:           "a daemon too old to name the fan",
+			effectiveKnown: true,
+			want:           true,
+		},
+		{
+			// The same shape from a current daemon, which is the scrape that
+			// caught the per-fan verdicts already cleared and control_effective
+			// not yet. Nothing is wrong, and saying so would be an alarm on
+			// every recovery.
+			name:             "a current daemon scraped mid-recovery",
+			fanVerdictsKnown: true,
+			effectiveKnown:   true,
+			want:             false,
+		},
+		{
+			// Every daemon for the first interval after it starts.
+			name: "effectiveness not yet known",
+			want: false,
+		},
 	}
-	m.snap.EffectiveKnown, m.snap.Effective = true, false
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := busyModel(120, 40)
+			// Below their floors, but with no verdict recorded against them,
+			// so the named-fan branch cannot be what fires.
+			m.snap.Fans = []state.Fan{
+				{Index: 0, Label: "Fan 1", Floor: 26, Observed: 12},
+				{Index: 1, Label: "Fan 2", Floor: 26, Observed: 12},
+			}
+			m.snap.FanVerdictsKnown = tc.fanVerdictsKnown
+			m.snap.EffectiveKnown, m.snap.Effective = tc.effectiveKnown, tc.effective
 
-	var found bool
-	for _, a := range m.alerts(m.w) {
-		if strings.Contains(ansi.ReplaceAllString(a, ""), "ilo4_unlock") {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("no reverted-patch alert while control_effective says the floors are ignored")
-	}
-
-	// And it must stay quiet when that gauge has no verdict to give, which is
-	// every daemon for the first interval after it starts.
-	m.snap.EffectiveKnown = false
-	for _, a := range m.alerts(m.w) {
-		if strings.Contains(ansi.ReplaceAllString(a, ""), "ilo4_unlock") {
-			t.Error("reverted-patch alert raised while effectiveness is still unknown")
-		}
+			var found bool
+			for _, a := range m.alerts(m.w) {
+				if strings.Contains(ansi.ReplaceAllString(a, ""), "ilo4_unlock") {
+					found = true
+				}
+			}
+			if found != tc.want {
+				t.Errorf("reverted-patch alert raised = %v, want %v", found, tc.want)
+			}
+		})
 	}
 }

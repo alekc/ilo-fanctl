@@ -46,6 +46,13 @@ That floor is not exported, so the subtraction cannot be done correctly from
 outside. `readback_mismatch_total` answers a different question: it counts
 whether this ever happened, where the gauge says whether it is happening now.
 
+There is a series for every configured fan from the first judged cycle
+onwards, healthy or not, so the family being absent means the daemon predates
+it rather than that nothing is wrong. That distinction is what lets a reader
+tell an old daemon apart from a current one with no fan to name, which matters
+because `control_effective` and these gauges are written a moment apart and a
+scrape can land between them.
+
 `build_info` and `config_info` are always 1, so the value carries nothing and
 the label is the point. A rollout is then two queries rather than a round of
 SSH, one for the shape of it and one for the stragglers:

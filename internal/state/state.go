@@ -140,6 +140,14 @@ type Snapshot struct {
 	Effective      bool
 	EffectiveKnown bool
 
+	// FanVerdictsKnown means the source of this snapshot publishes a per-fan
+	// mismatch verdict, so Fan.Mismatch is the whole answer and an Effective of
+	// false with no fan flagged is skew rather than an unnameable failure. Only
+	// a daemon older than ilo_fanctl_fan_mismatch leaves it false: the control
+	// loop fills the per-fan verdicts in itself, and a scraper can see whether
+	// the family is there.
+	FanVerdictsKnown bool
+
 	Critical    bool
 	BlindGroups int
 	Writes      float64

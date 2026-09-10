@@ -103,6 +103,36 @@ func TestSnapshotSurvivesTheMetricsRoundTrip(t *testing.T) {
 			},
 		},
 		{
+			// A daemon that has judged its fans and found nothing wrong. The
+			// per-fan verdicts are all 0 and control_effective is 1, which is
+			// the same shape as a daemon too old to publish a per-fan verdict
+			// at all, unless the reader can see that the family is there. It
+			// can only see that if this daemon publishes the family even when
+			// every fan passes, which is what this asserts: without it the UI
+			// falls back to announcing an unnameable reverted patch on any
+			// scrape that catches control_effective a moment behind.
+			name: "a healthy daemon still says which fans it judged",
+			setup: func(h *harness) {
+				h.bmc.spinUpLag = true
+				h.col.set("/dev/sda", 55)
+				h.cycle()
+				h.cycle()
+			},
+			check: func(t *testing.T, s state.Snapshot) {
+				if !s.FanVerdictsKnown {
+					t.Fatal("a scrape of a current daemon reads as one too old to name a fan")
+				}
+				if !s.EffectiveKnown || !s.Effective {
+					t.Fatalf("floors honoured but effective=%v known=%v", s.Effective, s.EffectiveKnown)
+				}
+				for _, f := range s.Fans {
+					if f.Mismatch {
+						t.Fatalf("fan %d flagged while the BMC is honouring every floor", f.Index)
+					}
+				}
+			},
+		},
+		{
 			// The degraded case is the one worth carrying across the wire
 			// intact: a group running on a held value looks identical to a
 			// healthy one unless the state is exported alongside the number.

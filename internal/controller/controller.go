@@ -331,6 +331,11 @@ func (c *Controller) cycle(ctx context.Context) {
 		ConfigChecksum: cfg.Checksum,
 		Interval:       cfg.Interval.Duration,
 		StartedAt:      c.startedAt,
+		// verify judges every configured fan and records the verdict on the
+		// fan, in the same pass that decides Effective, so the two can never
+		// be seen apart here and the UI's unnamed-mismatch fallback is never
+		// the right reading of this snapshot.
+		FanVerdictsKnown: true,
 	}
 	// Published even when the cycle fails part way, so the UI shows a BMC that
 	// has gone away rather than freezing on the last good reading.

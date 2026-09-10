@@ -937,13 +937,21 @@ func (m model) alerts(width int) []string {
 		add(sBad, fmt.Sprintf(
 			"the BMC is running %s below the commanded floor; an HPE firmware upgrade reverts the ilo4_unlock patch",
 			strings.Join(bad, ", ")))
-	} else if s.EffectiveKnown && !s.Effective {
-		// The daemon says its floors are not being honoured, yet named no fan.
-		// The only way to reach here is scraping one older than
-		// ilo_fanctl_fan_mismatch, which published the verdict for the machine
-		// and never per fan. Report it without the list rather than not at all:
-		// this alert going quiet is the failure it exists to prevent, and
-		// trading a wrong fan list for total silence is not an improvement.
+	} else if !s.FanVerdictsKnown && s.EffectiveKnown && !s.Effective {
+		// The daemon says its floors are not being honoured and cannot name a
+		// fan, because it is older than ilo_fanctl_fan_mismatch and published
+		// the verdict for the machine and never per fan. Report it without the
+		// list rather than not at all: this alert going quiet is the failure it
+		// exists to prevent, and trading a wrong fan list for total silence is
+		// not an improvement.
+		//
+		// FanVerdictsKnown is what keeps this off a current daemon, where no
+		// named fan means no fan is offending. There the per-fan verdicts and
+		// control_effective are written a few instructions apart, so a scrape
+		// can catch every verdict already cleared beside a control_effective
+		// still reading 0. That is a millisecond of skew, not a reverted patch,
+		// and without the guard this branch would announce one on every
+		// recovery.
 		add(sBad, "the BMC is not honouring the commanded floors; an HPE firmware upgrade reverts the ilo4_unlock patch")
 	}
 	if s.Err != "" {
